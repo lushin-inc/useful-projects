@@ -124,6 +124,13 @@
   #hiddenRow .chev{flex:none;transition:transform .15s;display:grid;place-items:center}
   #hiddenRow.open .chev{transform:rotate(90deg)}
 
+  #sideClose{
+    display:none;flex:none;
+    width:30px;height:30px;margin:0 0 8px 2px;
+    place-items:center;border-radius:7px;
+    color:var(--muted);
+  }
+  #sideClose:hover{color:var(--fg);background:var(--hover)}
   #newFolder{
     flex:none;padding:9px 10px;border-radius:8px;
     font-size:13.5px;color:var(--faint);text-align:left;
@@ -177,14 +184,19 @@
   #list::-webkit-scrollbar{width:0}
 
   .head{
+    display:flex;align-items:center;gap:6px;
     padding:16px 10px 6px 6px;
     font-size:11.5px;font-weight:500;
     letter-spacing:.06em;text-transform:uppercase;
     color:var(--faint);
     background:var(--bg);
+    cursor:pointer;
     -webkit-user-select:none;user-select:none;
   }
   .head:first-child{padding-top:2px}
+  .head:hover{color:var(--muted)}
+  .hchev{flex:none;display:grid;place-items:center;transition:transform .15s}
+  .head:not(.folded) .hchev{transform:rotate(90deg)}
 
   .row{
     position:relative;
@@ -416,8 +428,10 @@
     #app.collapsed #side{box-shadow:none}
     footer{padding-right:76px}
     #app{height:100dvh}
-    /* the toggle sits under the drawer, so tapping the list closes it */
+    /* the header toggle sits under the drawer, so the drawer carries its own */
     #app:not(.collapsed) #sideScrim{display:block}
+    #sideClose{display:grid}
+    #sideInner{padding-top:calc(22px + env(safe-area-inset-top))}
   }
 
   /* touch: no hover and no keyboard, so every affordance has to be visible */
@@ -440,6 +454,11 @@
   <div id="sideScrim"></div>
   <aside id="side">
     <div id="sideInner">
+      <button id="sideClose" type="button" aria-label="Hide folders">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
+          <rect x="1.2" y="2.2" width="13.6" height="11.6" rx="2.4"/><path d="M6 2.4v11.2"/>
+        </svg>
+      </button>
       <div id="folders"></div>
       <button id="newFolder" type="button">+ Folder</button>
     </div>
@@ -560,6 +579,7 @@
           s.folders.forEach(function(f){ if(typeof f.hidden !== 'boolean') f.hidden = false; });
           if(typeof s.hiddenOpen !== 'boolean') s.hiddenOpen = false;
           if(typeof s.updated !== 'number') s.updated = 0;
+          if(!Array.isArray(s.folded)) s.folded = [];
           return s;
         }
       }
@@ -572,7 +592,7 @@
     return {
       folders: [],
       items: (old || SEED).map(function(t){ return { id:uid(), text:t, folder:null }; }),
-      view:'all', collapsed:false, hiddenOpen:false, theme:null, updated:0
+      view:'all', collapsed:false, hiddenOpen:false, folded:[], theme:null, updated:0
     };
   }
   state = load();
@@ -606,6 +626,11 @@
   }
   function shownFolders(){ return state.folders.filter(function(f){ return !f.hidden; }); }
   function tuckedFolders(){ return state.folders.filter(function(f){ return f.hidden; }); }
+
+  function gkey(folder){ return folder || 'none'; }
+  function isFolded(key){ return state.view === 'all' && state.folded.indexOf(key) >= 0; }
+  /* what is actually on screen: in view, and not inside a folded group */
+  function onScreen(it){ return inView(it) && !isFolded(gkey(it.folder)); }
 
   function inView(it){
     if(state.view === 'all'){
@@ -693,12 +718,18 @@
     }
 
     gs.forEach(function(g){
+      var folded = false;
       if(labelled){
+        folded = isFolded(gkey(g.folder));
         var h = document.createElement('li');
-        h.className='head'; h.dataset.folder = g.folder || '';
-        h.textContent = g.name;
+        h.className = 'head' + (folded ? ' folded' : '');
+        h.dataset.folder = g.folder || '';
+        h.dataset.key = gkey(g.folder);
+        h.innerHTML = '<span class="hchev"><svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 1.5L7 5l-3.5 3.5"/></svg></span>';
+        h.appendChild(document.createTextNode(g.name));
         list.appendChild(h);
       }
+      if(folded) return;
       g.items.forEach(function(it){
         var li = document.createElement('li');
         li.className = 'row' + (sel===it.id ? ' sel' : '');
@@ -729,7 +760,7 @@
       if(it) seq.push({ it:it, folder: (list.querySelector('.head') ? folder : it.folder) });
     });
     var slots = [];
-    state.items.forEach(function(it,i){ if(inView(it)) slots.push(i); });
+    state.items.forEach(function(it,i){ if(onScreen(it)) slots.push(i); });
     if(seq.length !== slots.length) return;
     seq.forEach(function(s){ s.it.folder = s.folder; });
     seq.forEach(function(s,k){ state.items[slots[k]] = s.it; });
@@ -780,6 +811,7 @@
     save();
   }
   $('sideToggle').addEventListener('click', toggleSide);
+  $('sideClose').addEventListener('click', toggleSide);
   $('sideScrim').addEventListener('click', function(){
     app.classList.add('collapsed');
     state.collapsed = true; save();
@@ -915,6 +947,14 @@
     showToast('Deleted', function(){ state.items.splice(Math.min(idx,state.items.length),0,removed); });
   }
   list.addEventListener('click', function(e){
+    var head = e.target.closest('.head');
+    if(head){
+      var key = head.dataset.key;
+      var at = state.folded.indexOf(key);
+      if(at >= 0) state.folded.splice(at,1); else state.folded.push(key);
+      persist(); renderList();
+      return;
+    }
     var btn = e.target.closest('.del');
     if(btn){ deleteItem(btn.closest('.row').dataset.id); return; }
     var row = e.target.closest('.row');
@@ -980,7 +1020,7 @@
     if(!sel) return;
     var it = itemById(sel); if(!it) return;
     var peers = [];
-    state.items.forEach(function(x,i){ if(x.folder===it.folder && inView(x)) peers.push(i); });
+    state.items.forEach(function(x,i){ if(x.folder===it.folder && onScreen(x)) peers.push(i); });
     var at = peers.indexOf(state.items.indexOf(it));
     var to = at + dir;
     if(at < 0 || to < 0 || to >= peers.length) return;
@@ -1204,6 +1244,11 @@
       return;
     }
     readList();
+    var moved = itemById(el.dataset.id);
+    if(moved){
+      var k = gkey(moved.folder), at = state.folded.indexOf(k);
+      if(at >= 0){ state.folded.splice(at,1); persist(); }
+    }
     renderList();
   }
   window.addEventListener('pointerup', endDrag);
