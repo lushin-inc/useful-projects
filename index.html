@@ -515,6 +515,7 @@
     <div class="krow"><span class="kkeys"><kbd>1</kbd>–<kbd>9</kbd></span><span class="kdesc">Jump to a folder — the numbers shown in the sidebar</span></div>
     <div class="krow"><span class="kkeys"><kbd>H</kbd></span><span class="kdesc">Show or hide the Hidden folders</span></div>
     <div class="krow"><span class="kkeys"><kbd>⇧</kbd><kbd>⌫</kbd></span><span class="kdesc">Delete the folder you're in — its Things go to Unfiled</span></div>
+    <div class="krow"><span class="kkeys"><kbd>C</kbd></span><span class="kdesc">Collapse or expand every heading in All</span></div>
   </div>
   <div class="kgroup">
     <div class="klabel">View</div>
@@ -1030,6 +1031,15 @@
     var el = list.querySelector('.row.sel');
     if(el) el.scrollIntoView({block:'nearest'});
   }
+  /* fold or unfold every group at once (All view only — nowhere else has headings) */
+  function toggleFolds(){
+    if(state.view !== 'all' || !state.folders.length) return;
+    var keys = ['none'].concat(shownFolders().map(function(f){ return f.id; }));
+    var allFolded = keys.every(function(k){ return state.folded.indexOf(k) >= 0; });
+    state.folded = allFolded ? [] : keys;
+    persist(); renderList();
+  }
+
   function jump(n){
     var navs = [].slice.call(foldersEl.querySelectorAll('.folder'));
     if(navs[n-1]){ state.view = navs[n-1].dataset.id; sel = null; save(); render(); }
@@ -1110,6 +1120,7 @@
     if(k === 'Escape'){ closeAdd(); return; }
     if(k === 'N' && e.shiftKey){ e.preventDefault(); newFolder(); return; }
     if(k === 'n' || k === 'N'){ e.preventDefault(); newThing(); return; }
+    if(k === 'c' || k === 'C'){ e.preventDefault(); toggleFolds(); return; }
     if(k === 'm' || k === 'M'){ e.preventDefault(); openMover(); return; }
     if(k === 'b' || k === 'B'){ e.preventDefault(); toggleSide(); return; }
     if(k === 'l' || k === 'L'){ e.preventDefault(); toggleTheme(); return; }
