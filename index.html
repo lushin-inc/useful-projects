@@ -273,6 +273,46 @@
     border-radius:5px;padding:3px 7px;min-width:22px;text-align:center;
   }
   .kdesc{flex:1;color:var(--muted)}
+
+  /* ---------- move-to picker ---------- */
+  #mover{
+    position:fixed;inset:0;z-index:40;
+    background:var(--scrim);
+    display:none;place-items:center;
+    -webkit-user-select:none;user-select:none;
+  }
+  #mover.on{display:grid}
+  #moverBox{
+    width:min(340px,calc(100vw - 48px));
+    max-height:calc(100vh - 100px);
+    display:flex;flex-direction:column;
+    background:var(--bg);border-radius:14px;
+    padding:20px 0 10px;
+    box-shadow:0 24px 60px var(--shadow);
+  }
+  #moverBox h2{
+    margin:0 0 12px;padding:0 22px;
+    font-size:12px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--faint);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  #moverList{overflow-y:auto;padding:0 10px 6px}
+  #moverList::-webkit-scrollbar{width:0}
+  .mrow{
+    display:flex;align-items:center;gap:12px;
+    padding:10px 12px;border-radius:8px;
+    font-size:15px;color:var(--muted);
+  }
+  .mrow.on{background:var(--sel);color:var(--fg)}
+  .mrow .mnum{
+    flex:none;min-width:20px;text-align:center;
+    font-size:11.5px;
+    background:var(--sel);color:var(--fg);
+    border-radius:5px;padding:2px 5px;
+  }
+  .mrow.on .mnum{background:var(--accent);color:#fff}
+  .mrow .mname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mrow .mtag{flex:none;font-size:11px;color:var(--faint)}
 </style>
 </head>
 <body>
@@ -315,7 +355,8 @@
     <div class="klabel">Things</div>
     <div class="krow"><span class="kkeys"><kbd>N</kbd></span><span class="kdesc">New Thing</span></div>
     <div class="krow"><span class="kkeys"><kbd>↑</kbd><kbd>↓</kbd></span><span class="kdesc">Move the selection</span></div>
-    <div class="krow"><span class="kkeys"><kbd>⌥</kbd><kbd>↑</kbd><kbd>↓</kbd></span><span class="kdesc">Move the selected Thing</span></div>
+    <div class="krow"><span class="kkeys"><kbd>⌥</kbd><kbd>↑</kbd><kbd>↓</kbd></span><span class="kdesc">Move the selected Thing up or down</span></div>
+    <div class="krow"><span class="kkeys"><kbd>M</kbd></span><span class="kdesc">Move it to a folder — then press that folder's number</span></div>
     <div class="krow"><span class="kkeys"><kbd>↩</kbd></span><span class="kdesc">Rename it</span></div>
     <div class="krow"><span class="kkeys"><kbd>⌫</kbd></span><span class="kdesc">Delete it</span></div>
     <div class="krow"><span class="kkeys"><kbd>⌘</kbd><kbd>Z</kbd></span><span class="kdesc">Undo</span></div>
@@ -323,7 +364,7 @@
   <div class="kgroup">
     <div class="klabel">Folders</div>
     <div class="krow"><span class="kkeys"><kbd>⇧</kbd><kbd>N</kbd></span><span class="kdesc">New folder</span></div>
-    <div class="krow"><span class="kkeys"><kbd>1</kbd>–<kbd>9</kbd></span><span class="kdesc">Jump to a folder</span></div>
+    <div class="krow"><span class="kkeys"><kbd>0</kbd>–<kbd>9</kbd></span><span class="kdesc">Jump to a folder — the numbers shown in the sidebar</span></div>
     <div class="krow"><span class="kkeys"><kbd>H</kbd></span><span class="kdesc">Show or hide the Hidden folders</span></div>
   </div>
   <div class="kgroup">
@@ -335,6 +376,8 @@
   </div>
 </div></div>
 
+<div id="mover"><div id="moverBox"><h2 id="moverTitle">Move to</h2><div id="moverList"></div></div></div>
+
 <input id="file" type="file" accept=".txt,.json,text/plain" hidden>
 
 <script>
@@ -342,7 +385,7 @@
   "use strict";
 
   /* ---- a brand-new copy starts with these ---- */
-  var SEED = ["\"Useful Projects\" separate list", "Essentials Rec Portal", "All AP Recordings", "Higher Levels Course", "Inbox Empty", "LinkedIn Sales Nav Course", "Positive Psychology Therapists", "Hubexo KAM Team Cheat Sheet"];
+  var SEED = [];
 
   var KEY = 'useful-projects-v2';   /* unchanged: keeps existing lists intact */
   var OLD = 'useful-projects-v1';
@@ -351,7 +394,8 @@
   var app=$('app'), list=$('list'), titleEl=$('title'), foldersEl=$('folders'),
       toast=$('toast'), toastMsg=$('toastMsg'), undoBtn=$('undoBtn'),
       fileInput=$('file'), scrim=$('scrim'),
-      addWrap=$('addWrap'), addInput=$('addInput');
+      addWrap=$('addWrap'), addInput=$('addInput'),
+      mover=$('mover'), moverList=$('moverList'), moverTitle=$('moverTitle');
 
   var state=null, sel=null, undoAction=null, toastTimer=null;
 
@@ -450,7 +494,7 @@
   /* ---------- render ---------- */
   function renderFolders(){
     foldersEl.innerHTML = '';
-    var n = 1;
+    var n = 0;                       /* All is 0, Unfiled 1, folders 2+ — same numbers the move picker uses */
     function nav(id, name, opts){
       var b = document.createElement('div');
       b.className = 'folder' + (opts.fixed ? ' fixed' : '') + (state.view===id ? ' on' : '') + (opts.tucked ? ' tucked' : '');
@@ -786,10 +830,69 @@
   }
   function jump(n){
     var navs = [].slice.call(foldersEl.querySelectorAll('.folder'));
-    if(navs[n-1]){ state.view = navs[n-1].dataset.id; sel = null; save(); render(); }
+    if(navs[n]){ state.view = navs[n].dataset.id; sel = null; save(); render(); }
   }
 
+  /* ---------- move the selected Thing to a folder ---------- */
+  var moveOpts = [], moveAt = 0;
+
+  function renderMover(){
+    moverList.innerHTML = '';
+    moveOpts.forEach(function(o,i){
+      var r = document.createElement('div');
+      r.className = 'mrow' + (i===moveAt ? ' on' : '');
+      var n = document.createElement('span'); n.className='mnum'; n.textContent = String(i+1);
+      var nm = document.createElement('span'); nm.className='mname'; nm.textContent = o.name;
+      r.appendChild(n); r.appendChild(nm);
+      if(o.tag){ var t=document.createElement('span'); t.className='mtag'; t.textContent=o.tag; r.appendChild(t); }
+      moverList.appendChild(r);
+    });
+    var on = moverList.querySelector('.mrow.on');
+    if(on) on.scrollIntoView({block:'nearest'});
+  }
+  function openMover(){
+    if(!sel || !state.folders.length) return;
+    var it = itemById(sel); if(!it) return;
+    moveOpts = [{ id:null, name:'Unfiled', tag:'' }];
+    shownFolders().forEach(function(f){ moveOpts.push({ id:f.id, name:f.name, tag:'' }); });
+    tuckedFolders().forEach(function(f){ moveOpts.push({ id:f.id, name:f.name, tag:'hidden' }); });
+    moveAt = Math.max(0, moveOpts.findIndex(function(o){ return o.id === (it.folder || null); }));
+    moverTitle.textContent = 'Move — ' + it.text;
+    renderMover();
+    mover.classList.add('on');
+  }
+  function closeMover(){ mover.classList.remove('on'); }
+  function commitMove(i){
+    var o = moveOpts[i];
+    closeMover();
+    if(!o || !sel) return;
+    var it = itemById(sel); if(!it) return;
+    var prior = it.folder || null;
+    if(prior === o.id) return;
+    it.folder = o.id;
+    if(!inView(it)) sel = null;
+    save(); render();
+    showToast(o.id ? 'Moved to ' + o.name : 'Moved to Unfiled', function(){ it.folder = prior; });
+    var el = list.querySelector('.row.sel');
+    if(el) el.scrollIntoView({block:'nearest'});
+  }
+  mover.addEventListener('click', function(e){
+    var r = e.target.closest('.mrow');
+    if(r){ commitMove([].indexOf.call(moverList.children, r)); return; }
+    if(e.target === mover) closeMover();
+  });
+
   document.addEventListener('keydown', function(e){
+    if(mover.classList.contains('on')){
+      e.preventDefault();
+      if(e.key==='Escape'){ closeMover(); return; }
+      if(e.key==='ArrowDown'){ moveAt = Math.min(moveOpts.length-1, moveAt+1); renderMover(); return; }
+      if(e.key==='ArrowUp'){ moveAt = Math.max(0, moveAt-1); renderMover(); return; }
+      if(e.key==='Enter'){ commitMove(moveAt); return; }
+      var d = /^Digit([1-9])$/.exec(e.code || '');
+      if(d) commitMove(parseInt(d[1],10) - 1);
+      return;
+    }
     if(scrim.classList.contains('on')){
       if(e.key==='Escape' || e.key==='?'){ e.preventDefault(); help(false); }
       return;
@@ -803,10 +906,11 @@
     if(k === 'Escape'){ closeAdd(); return; }
     if(k === 'N' && e.shiftKey){ e.preventDefault(); newFolder(); return; }
     if(k === 'n' || k === 'N'){ e.preventDefault(); newThing(); return; }
+    if(k === 'm' || k === 'M'){ e.preventDefault(); openMover(); return; }
     if(k === 'b' || k === 'B'){ e.preventDefault(); toggleSide(); return; }
     if(k === 'l' || k === 'L'){ e.preventDefault(); toggleTheme(); return; }
     if(k === 'h' || k === 'H'){ e.preventDefault(); toggleHidden(); return; }
-    if(k >= '1' && k <= '9'){ e.preventDefault(); jump(parseInt(k,10)); return; }
+    if(k >= '0' && k <= '9'){ e.preventDefault(); jump(parseInt(k,10)); return; }
     if(k === 'ArrowDown'){ e.preventDefault(); e.altKey ? nudge(1) : moveSel(1); return; }
     if(k === 'ArrowUp'){ e.preventDefault(); e.altKey ? nudge(-1) : moveSel(-1); return; }
     if(k === 'Enter'){
