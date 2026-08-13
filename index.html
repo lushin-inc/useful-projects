@@ -424,9 +424,13 @@
     main{max-width:none}
     #side{
       position:absolute;left:0;top:0;bottom:0;z-index:18;
+      width:200px;
       box-shadow:8px 0 28px var(--shadow);
+      transition:transform .2s ease;
+      transform:translateX(0);
     }
-    #app.collapsed #side{box-shadow:none}
+    #app.collapsed #side{width:200px;transform:translateX(-100%);box-shadow:none}
+    #app.collapsed.peek #side{transform:translateX(0)}
     footer{padding-right:76px}
     #app{height:100dvh}
     /* the header toggle sits under the drawer, so the drawer carries its own */
@@ -516,6 +520,7 @@
     <div class="krow"><span class="kkeys"><kbd>⇧</kbd><kbd>N</kbd></span><span class="kdesc">New folder</span></div>
     <div class="krow"><span class="kkeys"><kbd>1</kbd>–<kbd>9</kbd></span><span class="kdesc">Jump to a folder — the numbers shown in the sidebar</span></div>
     <div class="krow"><span class="kkeys"><kbd>H</kbd></span><span class="kdesc">Show or hide the Hidden folders</span></div>
+    <div class="krow"><span class="kkeys"><kbd>⌥</kbd><kbd>⇧</kbd><kbd>↑</kbd><kbd>↓</kbd></span><span class="kdesc">Move the folder you're in up or down</span></div>
     <div class="krow"><span class="kkeys"><kbd>⇧</kbd><kbd>⌫</kbd></span><span class="kdesc">Delete the folder you're in — its Things go to Unfiled</span></div>
     <div class="krow"><span class="kkeys"><kbd>C</kbd></span><span class="kdesc">Collapse or expand the heading you are on</span></div>
   </div>
@@ -815,6 +820,66 @@
   }
   $('sideToggle').addEventListener('click', toggleSide);
   $('sideClose').addEventListener('click', toggleSide);
+
+  /* ---- edge swipe: drag the drawer out, drag it back ---- */
+  (function(){
+    var side = $('side'), scrimEl = $('sideScrim'), W = 200, EDGE = 30, sw = null;
+
+    function busy(){
+      return scrim.classList.contains('on') || mover.classList.contains('on') ||
+             addScrim.classList.contains('on') || syncScrim.classList.contains('on');
+    }
+    function paint(x){
+      side.style.transform = 'translateX(' + x + 'px)';
+      scrimEl.style.display = 'block';
+      scrimEl.style.opacity = String(Math.max(0, Math.min(1, 1 + x / W)));
+    }
+    function release(){
+      side.style.transition = '';
+      side.style.transform = '';
+      scrimEl.style.display = '';
+      scrimEl.style.opacity = '';
+    }
+
+    document.addEventListener('touchstart', function(e){
+      sw = null;
+      if(!narrow() || busy() || e.touches.length !== 1) return;
+      if(e.target.closest && e.target.closest('.grip')) return;   /* that is a row drag */
+      var t = e.touches[0];
+      var open = !app.classList.contains('collapsed');
+      if(open || t.clientX <= EDGE) sw = { x0:t.clientX, y0:t.clientY, open:open, live:false, x:open?0:-W };
+    }, {passive:true});
+
+    document.addEventListener('touchmove', function(e){
+      if(!sw || e.touches.length !== 1) return;
+      var t = e.touches[0];
+      var dx = t.clientX - sw.x0, dy = t.clientY - sw.y0;
+
+      if(!sw.live){
+        if(Math.abs(dy) > Math.abs(dx)){ sw = null; return; }      /* they are scrolling */
+        if(Math.abs(dx) < 10) return;                              /* not yet a swipe */
+        if(sw.open && dx > 0){ sw = null; return; }                /* already all the way out */
+        sw.live = true;
+        side.style.transition = 'none';
+      }
+      sw.x = sw.open ? Math.max(-W, Math.min(0, dx)) : Math.max(-W, Math.min(0, -W + dx));
+      paint(sw.x);
+      e.preventDefault();
+    }, {passive:false});
+
+    function finish(){
+      if(!sw) return;
+      var live = sw.live, x = sw.x;
+      sw = null;
+      if(!live) return;
+      var open = x > -W / 2;                       /* past halfway wins */
+      release();
+      app.classList.toggle('collapsed', !open);
+      state.collapsed = !open; save();
+    }
+    document.addEventListener('touchend', finish, {passive:true});
+    document.addEventListener('touchcancel', function(){ if(sw){ sw = null; release(); } }, {passive:true});
+  })();
   $('sideScrim').addEventListener('click', function(){
     app.classList.add('collapsed');
     state.collapsed = true; save();
@@ -1099,6 +1164,22 @@
     persist(); renderList();
   }
 
+  /* shuffle the folder you are in up or down the sidebar */
+  function moveFolder(dir){
+    if(state.view === 'all' || state.view === 'none') return;
+    var f = folderById(state.view); if(!f) return;
+    /* stay among peers of the same kind so this can never hide or unhide anything */
+    var peers = [];
+    state.folders.forEach(function(x,i){ if(!!x.hidden === !!f.hidden) peers.push(i); });
+    var at = peers.indexOf(state.folders.indexOf(f));
+    var to = at + dir;
+    if(at < 0 || to < 0 || to >= peers.length) return;
+    var a = peers[at], b = peers[to], tmp = state.folders[a];
+    state.folders[a] = state.folders[b];
+    state.folders[b] = tmp;
+    save(); render();
+  }
+
   function jump(n){
     var navs = [].slice.call(foldersEl.querySelectorAll('.folder'));
     if(navs[n-1]){ state.view = navs[n-1].dataset.id; clearSel(); save(); render(); }
@@ -1199,8 +1280,14 @@
     if(k === 'l' || k === 'L'){ e.preventDefault(); toggleTheme(); return; }
     if(k === 'h' || k === 'H'){ e.preventDefault(); toggleHidden(); return; }
     if(k >= '1' && k <= '9'){ e.preventDefault(); jump(parseInt(k,10)); return; }
-    if(k === 'ArrowDown'){ e.preventDefault(); e.altKey ? nudge(1) : moveSel(1, e.shiftKey); return; }
-    if(k === 'ArrowUp'){ e.preventDefault(); e.altKey ? nudge(-1) : moveSel(-1, e.shiftKey); return; }
+    if(k === 'ArrowDown' || k === 'ArrowUp'){
+      var dir = (k === 'ArrowDown') ? 1 : -1;
+      e.preventDefault();
+      if(e.altKey && e.shiftKey) moveFolder(dir);      /* the folder itself */
+      else if(e.altKey) nudge(dir);                    /* the selected Thing */
+      else moveSel(dir, e.shiftKey);                   /* the selection */
+      return;
+    }
     if(k === 'Enter'){
       if(selKey){ e.preventDefault(); foldCurrent(); return; }
       if(selSet.length > 1) return;                 /* renaming a range makes no sense */
