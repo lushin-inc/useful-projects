@@ -246,6 +246,12 @@
     -webkit-user-select:none;user-select:none;
   }
   #scrim.on{display:grid}
+  #syncScrim{
+    position:fixed;inset:0;z-index:35;
+    background:var(--scrim);
+    display:none;place-items:center;
+  }
+  #syncScrim.on{display:grid}
   #sheet{
     width:min(520px,calc(100vw - 48px));
     max-height:calc(100vh - 80px);
@@ -313,6 +319,39 @@
   .mrow.on .mnum{background:var(--accent);color:#fff}
   .mrow .mname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .mrow .mtag{flex:none;font-size:11px;color:var(--faint)}
+
+  /* ---------- sync ---------- */
+  #syncState{font-size:11px;color:var(--faint)}
+  #syncState.err{color:#e06c5a}
+  #syncSheet{
+    width:min(420px,calc(100vw - 48px));
+    background:var(--bg);border-radius:14px;
+    padding:24px 26px 22px;
+    box-shadow:0 24px 60px var(--shadow);
+  }
+  #syncSheet h2{
+    margin:0 0 4px;
+    font-size:14px;font-weight:500;letter-spacing:.03em;color:var(--muted);
+  }
+  #syncSheet .note{font-size:12.5px;color:var(--faint);margin:0 0 18px;line-height:1.5}
+  #syncSheet label{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin:14px 0 6px}
+  #syncSheet input{
+    width:100%;border:0;outline:0;background:var(--hover);
+    color:var(--fg);font:inherit;font-size:14.5px;
+    padding:10px 12px;border-radius:8px;
+    caret-color:var(--accent);
+  }
+  #syncSheet input::placeholder{color:var(--faint)}
+  #syncBtns{display:flex;align-items:center;gap:10px;margin-top:20px}
+  #syncBtns button{
+    padding:9px 16px;border-radius:8px;font-size:14px;
+    background:var(--sel);color:var(--fg);
+  }
+  #syncBtns button:hover{background:var(--accent);color:#fff}
+  #syncOff{margin-left:auto;background:0;color:var(--faint);font-size:12.5px;padding:9px 4px}
+  #syncOff:hover{background:0;color:#e06c5a}
+  #syncMsg{margin-top:14px;font-size:12.5px;color:var(--muted);min-height:1em}
+  #syncMsg.err{color:#e06c5a}
 </style>
 </head>
 <body>
@@ -341,6 +380,8 @@
     <footer>
       <button id="exportBtn" type="button">Export</button>
       <button id="importBtn" type="button">Import</button>
+      <button id="syncBtn" type="button">Sync</button>
+      <span id="syncState"></span>
       <button id="helpBtn" type="button" aria-label="Keyboard shortcuts">?</button>
       <button id="themeBtn" type="button" aria-label="Toggle theme"></button>
     </footer>
@@ -378,6 +419,21 @@
 
 <div id="mover"><div id="moverBox"><h2 id="moverTitle">Move to</h2><div id="moverList"></div></div></div>
 
+<div id="syncScrim"><div id="syncSheet">
+  <h2>Sync</h2>
+  <p class="note">Keeps this list the same on every device through a private GitHub repo. The token is stored on this device only — it is never part of the page.</p>
+  <label for="syncRepo">Private repo</label>
+  <input id="syncRepo" type="text" placeholder="lushin-inc/stuff-data" autocomplete="off" autocorrect="off" spellcheck="false">
+  <label for="syncToken">Fine-grained token</label>
+  <input id="syncToken" type="password" placeholder="github_pat_…" autocomplete="off" spellcheck="false">
+  <div id="syncBtns">
+    <button id="syncConnect" type="button">Connect</button>
+    <button id="syncNow" type="button">Sync now</button>
+    <button id="syncOff" type="button">Disconnect</button>
+  </div>
+  <div id="syncMsg"></div>
+</div></div>
+
 <input id="file" type="file" accept=".txt,.json,text/plain" hidden>
 
 <script>
@@ -402,7 +458,10 @@
   function uid(){ return Math.random().toString(36).slice(2,9); }
 
   /* ---------- storage ---------- */
-  function save(){ try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){} }
+  function now(){ return Date.now(); }
+  function persist(){ try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){} }
+  /* save() means "I changed something" — stamps it and queues a push */
+  function save(){ state.updated = now(); persist(); schedulePush(); }
   function load(){
     try{
       var raw = localStorage.getItem(KEY);
@@ -411,6 +470,7 @@
         if(s && Array.isArray(s.items) && Array.isArray(s.folders)){
           s.folders.forEach(function(f){ if(typeof f.hidden !== 'boolean') f.hidden = false; });
           if(typeof s.hiddenOpen !== 'boolean') s.hiddenOpen = false;
+          if(typeof s.updated !== 'number') s.updated = 0;
           return s;
         }
       }
@@ -423,10 +483,10 @@
     return {
       folders: [],
       items: (old || SEED).map(function(t){ return { id:uid(), text:t, folder:null }; }),
-      view:'all', collapsed:false, hiddenOpen:false, theme:null
+      view:'all', collapsed:false, hiddenOpen:false, theme:null, updated:0
     };
   }
-  state = load(); save();
+  state = load();
 
   /* ---------- theme ---------- */
   var SUN='<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="8" cy="8" r="3.1"/><path d="M8 .9v1.6M8 13.5v1.6M15.1 8h-1.6M2.5 8H.9M13 3l-1.1 1.1M4.1 11.9L3 13M13 13l-1.1-1.1M4.1 4.1L3 3"/></svg>';
@@ -883,6 +943,7 @@
   });
 
   document.addEventListener('keydown', function(e){
+    if(syncScrim && syncScrim.classList.contains('on')) return;   /* the sync sheet owns the keyboard */
     if(mover.classList.contains('on')){
       e.preventDefault();
       if(e.key==='Escape'){ closeMover(); return; }
@@ -1086,8 +1147,246 @@
     fileInput.value = '';
   });
 
+  /* ---------- sync: one JSON file in a private GitHub repo ---------- */
+  var SKEY = 'useful-things-sync';
+  var syncCfg = { repo:'', token:'', path:'stuff.json' };
+  var syncSha = null, pushTimer = null, pullTimer = null, syncBusy = false, syncHalted = false;
+  var dirty = false;   /* local edits that have not reached the repo yet */
+
+  var syncScrim=$('syncScrim'), syncMsg=$('syncMsg'), syncState=$('syncState'),
+      syncRepo=$('syncRepo'), syncToken=$('syncToken');
+
+  try{
+    var raw = localStorage.getItem(SKEY);
+    if(raw){ var c = JSON.parse(raw); if(c && c.repo && c.token) syncCfg = { repo:c.repo, token:c.token, path:c.path || 'stuff.json' }; }
+  }catch(e){}
+  function syncOn(){ return !!(syncCfg.repo && syncCfg.token); }
+  function saveCfg(){ try{ localStorage.setItem(SKEY, JSON.stringify(syncCfg)); }catch(e){} }
+
+  function setState(txt, bad){
+    syncState.textContent = txt || '';
+    syncState.classList.toggle('err', !!bad);
+  }
+  function b64enc(str){
+    var bytes = new TextEncoder().encode(str), bin = '';
+    for(var i=0;i<bytes.length;i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin);
+  }
+  function b64dec(b64){
+    var bin = atob(String(b64).replace(/\s/g,''));
+    var bytes = new Uint8Array(bin.length);
+    for(var i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  }
+  function api(method, body, cfg){
+    cfg = cfg || syncCfg;
+    return fetch('https://api.github.com/repos/' + cfg.repo + '/contents/' + cfg.path, {
+      method: method,
+      cache: 'no-store',
+      headers: {
+        'Authorization': 'Bearer ' + cfg.token,
+        'Accept': 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28'
+      },
+      body: body ? JSON.stringify(body) : undefined
+    });
+  }
+  function payload(){
+    return { updated: state.updated, folders: state.folders, items: state.items };
+  }
+  function adopt(data){
+    state.folders = Array.isArray(data.folders) ? data.folders : [];
+    state.folders.forEach(function(f){ if(typeof f.hidden !== 'boolean') f.hidden = false; });
+    state.items = Array.isArray(data.items) ? data.items : [];
+    state.updated = typeof data.updated === 'number' ? data.updated : now();
+    if(state.view !== 'all' && state.view !== 'none' && !folderById(state.view)) state.view = 'all';
+    sel = null;
+    persist(); render();
+  }
+  /* Fold anything the repo has that this device doesn't into the local list.
+     Ids are stable, so additions from both sides survive. Local order wins. */
+  function mergeIn(rd){
+    var haveF = {};
+    state.folders.forEach(function(f){ haveF[f.id] = true; });
+    (rd.folders || []).forEach(function(f){
+      if(f && f.id && !haveF[f.id]) state.folders.push({ id:f.id, name:f.name, hidden:!!f.hidden });
+    });
+    var haveI = {};
+    state.items.forEach(function(it){ haveI[it.id] = true; });
+    var added = 0;
+    (rd.items || []).forEach(function(it){
+      if(it && it.id && !haveI[it.id]){ state.items.push(it); added++; }
+    });
+    return added;
+  }
+
+  function fail(r){
+    syncHalted = (r.status === 401 || r.status === 403 || r.status === 404);
+    setState(r.status === 401 || r.status === 403 ? 'sync: check token' : 'sync: error', true);
+  }
+
+  /* {missing:true} | {sha,data} | {error:status} — never mutates the live config */
+  function fetchRemote(cfg, quiet){
+    return api('GET', null, cfg).then(function(r){
+      if(r.status === 404) return { missing:true };
+      if(!r.ok){ if(!quiet) fail(r); return { error:r.status }; }
+      return r.json().then(function(j){
+        var out = { sha:j.sha };
+        try{ out.data = JSON.parse(b64dec(j.content)); }
+        catch(e){ out.missing = true; }
+        return out;
+      });
+    }).catch(function(){ if(!quiet) setState('sync: offline', true); return { error:0 }; });
+  }
+
+  function pushNow(){
+    if(!syncOn() || syncHalted || syncBusy) return Promise.resolve();
+    syncBusy = true;
+    setState('syncing…');
+    var body = { message:'stuff', content: b64enc(JSON.stringify(payload())) };
+    if(syncSha) body.sha = syncSha;
+    return api('PUT', body).then(function(r){
+      if(r.status === 409 || r.status === 422){
+        /* someone else wrote first — take their sha, then overwrite with ours */
+        return api('GET').then(function(g){
+          if(!g.ok){ fail(g); return; }
+          return g.json().then(function(j){
+            syncSha = j.sha;
+            return api('PUT', { message:'stuff', content: b64enc(JSON.stringify(payload())), sha: syncSha })
+              .then(function(r2){
+                if(!r2.ok){ fail(r2); return; }
+                return r2.json().then(function(x){ syncSha = x.content.sha; dirty = false; setState('synced'); });
+              });
+          });
+        });
+      }
+      if(!r.ok){ fail(r); return; }
+      return r.json().then(function(j){ syncSha = j.content.sha; dirty = false; setState('synced'); });
+    }).catch(function(){ setState('sync: offline', true); })
+      .then(function(){ syncBusy = false; });
+  }
+
+  function schedulePush(){
+    if(!syncOn()) return;
+    dirty = true;
+    if(syncHalted) return;
+    setState('syncing…');
+    clearTimeout(pushTimer);
+    pushTimer = setTimeout(pushNow, 1200);
+  }
+
+  function pullNow(){
+    if(!syncOn() || syncHalted || syncBusy) return Promise.resolve();
+    syncBusy = true;
+    return fetchRemote().then(function(res){
+      syncBusy = false;
+      if(res.error !== undefined) return;
+      if(res.missing) return pushNow();
+      syncSha = res.sha;
+      /* unpushed local edits: fold the repo in and send the combined list back,
+         so neither side's additions are dropped and both ends converge */
+      if(dirty){
+        var added = mergeIn(res.data);
+        state.updated = now(); persist();
+        if(added) render();
+        return pushNow();
+      }
+      if((res.data.updated || 0) > (state.updated || 0)) adopt(res.data);
+      setState('synced');
+    }).catch(function(){ syncBusy = false; });
+  }
+
+  function startPolling(){
+    clearInterval(pullTimer);
+    if(!syncOn()) return;
+    pullTimer = setInterval(function(){
+      if(document.visibilityState === 'visible') pullNow();
+    }, 60000);
+  }
+  document.addEventListener('visibilitychange', function(){
+    if(document.visibilityState === 'visible' && syncOn() && !syncHalted) pullNow();
+  });
+  window.addEventListener('focus', function(){ if(syncOn() && !syncHalted) pullNow(); });
+
+  /* ---- the setup sheet ---- */
+  function openSync(){
+    syncRepo.value = syncCfg.repo;
+    syncToken.value = syncCfg.token;
+    syncMsg.textContent = syncOn() ? 'Connected to ' + syncCfg.repo : '';
+    syncMsg.classList.remove('err');
+    syncScrim.classList.add('on');
+    (syncCfg.repo ? syncToken : syncRepo).focus();
+  }
+  function closeSync(){ syncScrim.classList.remove('on'); }
+  $('syncBtn').addEventListener('click', openSync);
+  syncScrim.addEventListener('click', function(e){ if(e.target === syncScrim) closeSync(); });
+  syncScrim.addEventListener('keydown', function(e){
+    e.stopPropagation();
+    if(e.key === 'Escape') closeSync();
+    if(e.key === 'Enter') $('syncConnect').click();
+  });
+
+  function say(t, bad){ syncMsg.textContent = t; syncMsg.classList.toggle('err', !!bad); }
+
+  $('syncConnect').addEventListener('click', function(){
+    var repo = syncRepo.value.trim().replace(/^https?:\/\/github\.com\//,'').replace(/\.git$/,'').replace(/\/+$/,'');
+    var token = syncToken.value.trim();
+    if(!/^[\w.-]+\/[\w.-]+$/.test(repo)){ say('Use the owner/repo form, like dan-faber/stuff-data.', true); return; }
+    if(!token){ say('Paste the token.', true); return; }
+    var candidate = { repo:repo, token:token, path:'stuff.json' };
+    say('Connecting…');
+    /* probe with the candidate — the working config is left alone unless this succeeds */
+    fetchRemote(candidate, true).then(function(res){
+      if(res.error !== undefined){
+        say(res.error === 401 || res.error === 403
+          ? 'That token was rejected. It needs Contents: read and write on this repo — and for an organisation repo, an owner has to approve it first.'
+          : 'Could not reach that repo. Check the owner/repo name, and that the token lists this repo.', true);
+        return;
+      }
+      var wasCfg = syncCfg, wasSha = syncSha;
+      syncCfg = candidate; syncSha = res.sha || null;
+      syncHalted = false; syncBusy = false;
+
+      if(res.missing){
+        /* first device in: seed the file from what is here */
+        return pushNow().then(function(){
+          if(syncHalted){
+            syncCfg = wasCfg; syncSha = wasSha; syncHalted = false;
+            say('Reached that repo, but the token cannot write to it. Give it Contents: read and write.', true);
+            return;
+          }
+          saveCfg(); startPolling();
+          say('Connected. This list is now the shared copy.');
+        });
+      }
+      /* joining an existing list: the repo wins, always */
+      adopt(res.data);
+      saveCfg(); startPolling(); setState('synced');
+      say('Connected. Pulled ' + state.items.length + ' Things from the repo.');
+    });
+  });
+
+  $('syncNow').addEventListener('click', function(){
+    if(!syncOn()){ say('Connect first.', true); return; }
+    syncHalted = false;
+    say('Syncing…');
+    pullNow().then(function(){ say(syncHalted ? 'Sync failed — check the token.' : 'Up to date.', syncHalted); });
+  });
+
+  $('syncOff').addEventListener('click', function(){
+    syncCfg = { repo:'', token:'', path:'stuff.json' };
+    syncSha = null; syncHalted = false;
+    try{ localStorage.removeItem(SKEY); }catch(e){}
+    clearInterval(pullTimer);
+    setState('');
+    syncRepo.value = ''; syncToken.value = '';
+    say('Disconnected. The list stays on this device.');
+  });
+
+  persist();
   applyTheme();
   render();
+  if(syncOn()){ setState('syncing…'); pullNow(); startPolling(); }
 })();
 </script>
 </body>
