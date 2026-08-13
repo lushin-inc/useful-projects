@@ -419,6 +419,9 @@
   #syncOff:hover{background:0;color:#e06c5a}
   #syncMsg{margin-top:14px;font-size:12.5px;color:var(--muted);min-height:1em}
   #syncMsg.err{color:#e06c5a}
+  #syncFile{display:flex;gap:18px;margin-top:18px;font-size:11.5px;color:var(--faint)}
+  #syncFile button{transition:color .12s}
+  #syncFile button:hover{color:var(--muted)}
   /* narrow screens: the sidebar floats over the list instead of squeezing it */
   @media (max-width:640px){
     main{max-width:none}
@@ -483,8 +486,6 @@
     <ul id="list"></ul>
 
     <footer>
-      <button id="exportBtn" type="button">Export</button>
-      <button id="importBtn" type="button">Import</button>
       <button id="syncBtn" type="button">Sync</button>
       <span id="syncState"></span>
       <button id="helpBtn" type="button" aria-label="Keyboard shortcuts">?</button>
@@ -548,6 +549,10 @@
     <button id="syncOff" type="button">Disconnect</button>
   </div>
   <div id="syncMsg"></div>
+  <div id="syncFile">
+    <button id="exportBtn" type="button">Export a text copy</button>
+    <button id="importBtn" type="button">Import</button>
+  </div>
 </div></div>
 
 <input id="file" type="file" accept=".txt,.json,text/plain" hidden>
