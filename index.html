@@ -495,6 +495,7 @@
     <div class="krow"><span class="kkeys"><kbd>⇧</kbd><kbd>N</kbd></span><span class="kdesc">New folder</span></div>
     <div class="krow"><span class="kkeys"><kbd>1</kbd>–<kbd>9</kbd></span><span class="kdesc">Jump to a folder — the numbers shown in the sidebar</span></div>
     <div class="krow"><span class="kkeys"><kbd>H</kbd></span><span class="kdesc">Show or hide the Hidden folders</span></div>
+    <div class="krow"><span class="kkeys"><kbd>⇧</kbd><kbd>⌫</kbd></span><span class="kdesc">Delete the folder you're in — its Things go to Unfiled</span></div>
   </div>
   <div class="kgroup">
     <div class="klabel">View</div>
@@ -1082,6 +1083,11 @@
       return;
     }
     if(k === 'Backspace' || k === 'Delete'){
+      if(e.shiftKey){
+        /* the folder you are looking at — its Things fall back to Unfiled */
+        if(state.view !== 'all' && state.view !== 'none'){ e.preventDefault(); deleteFolder(state.view); }
+        return;
+      }
       if(sel){ e.preventDefault(); deleteItem(sel); }
       return;
     }
