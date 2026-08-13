@@ -38,8 +38,11 @@
     --scrim:rgba(0,0,0,.28);
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-  html,body{height:100%}
+  html,body{height:100%;overflow:hidden;overscroll-behavior:none}
   body{
+    /* pinned to the viewport: on iOS the page itself would otherwise scroll
+       and take the header and footer off screen */
+    position:fixed;top:0;right:0;bottom:0;left:0;
     margin:0;
     background:var(--bg);
     color:var(--fg);
@@ -62,7 +65,7 @@
   }
   #app.collapsed #side{width:0}
   #app.collapsed.peek #side{width:200px}
-  #sideInner{width:200px;padding:56px 10px 10px;display:flex;flex-direction:column;height:100%}
+  #sideInner{width:200px;padding:calc(56px + env(safe-area-inset-top)) 10px 10px;display:flex;flex-direction:column;height:100%}
 
   #folders{flex:1;overflow-y:auto;overflow-x:hidden;position:relative}
   #folders::-webkit-scrollbar{width:0}
@@ -135,7 +138,7 @@
 
   header{
     flex:none;display:flex;align-items:center;gap:6px;
-    padding:22px 0 14px 0;
+    padding:calc(22px + env(safe-area-inset-top)) 0 14px 0;
     -webkit-app-region:drag;
   }
   #sideToggle{
@@ -165,6 +168,7 @@
   #list{
     list-style:none;margin:0;padding:0 0 24px;
     flex:1;overflow-y:auto;overflow-x:hidden;position:relative;
+    -webkit-overflow-scrolling:touch;overscroll-behavior:contain;
   }
   #list::-webkit-scrollbar{width:0}
 
@@ -407,6 +411,7 @@
     }
     #app.collapsed #side{box-shadow:none}
     footer{padding-right:76px}
+    #app{height:100dvh}
   }
 
   /* touch: no hover and no keyboard, so every affordance has to be visible */
@@ -516,7 +521,7 @@
   "use strict";
 
   /* ---- a brand-new copy starts with these ---- */
-  var SEED = ["\"Useful Projects\" separate list", "Essentials Rec Portal", "All AP Recordings", "Higher Levels Course", "Inbox Empty", "LinkedIn Sales Nav Course", "Positive Psychology Therapists", "Hubexo KAM Team Cheat Sheet"];
+  var SEED = [];
 
   var KEY = 'useful-projects-v2';   /* unchanged: keeps existing lists intact */
   var OLD = 'useful-projects-v1';
