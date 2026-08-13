@@ -493,7 +493,7 @@
   <div class="kgroup">
     <div class="klabel">Folders</div>
     <div class="krow"><span class="kkeys"><kbd>⇧</kbd><kbd>N</kbd></span><span class="kdesc">New folder</span></div>
-    <div class="krow"><span class="kkeys"><kbd>0</kbd>–<kbd>9</kbd></span><span class="kdesc">Jump to a folder — the numbers shown in the sidebar</span></div>
+    <div class="krow"><span class="kkeys"><kbd>1</kbd>–<kbd>9</kbd></span><span class="kdesc">Jump to a folder — the numbers shown in the sidebar</span></div>
     <div class="krow"><span class="kkeys"><kbd>H</kbd></span><span class="kdesc">Show or hide the Hidden folders</span></div>
   </div>
   <div class="kgroup">
@@ -642,7 +642,7 @@
   /* ---------- render ---------- */
   function renderFolders(){
     foldersEl.innerHTML = '';
-    var n = 0;                       /* All is 0, Unfiled 1, folders 2+ — same numbers the move picker uses */
+    var n = 1;                       /* All is 1, Unfiled 2, folders 3+ — same numbers the move picker uses */
     function nav(id, name, opts){
       var b = document.createElement('div');
       b.className = 'folder' + (opts.fixed ? ' fixed' : '') + (state.view===id ? ' on' : '') + (opts.tucked ? ' tucked' : '');
@@ -991,7 +991,7 @@
   }
   function jump(n){
     var navs = [].slice.call(foldersEl.querySelectorAll('.folder'));
-    if(navs[n]){ state.view = navs[n].dataset.id; sel = null; save(); render(); }
+    if(navs[n-1]){ state.view = navs[n-1].dataset.id; sel = null; save(); render(); }
   }
 
   /* ---------- move the selected Thing to a folder ---------- */
@@ -1002,7 +1002,7 @@
     moveOpts.forEach(function(o,i){
       var r = document.createElement('div');
       r.className = 'mrow' + (i===moveAt ? ' on' : '');
-      var n = document.createElement('span'); n.className='mnum'; n.textContent = String(i+1);
+      var n = document.createElement('span'); n.className='mnum'; n.textContent = String(i+2);
       var nm = document.createElement('span'); nm.className='mname'; nm.textContent = o.name;
       r.appendChild(n); r.appendChild(nm);
       if(o.tag){ var t=document.createElement('span'); t.className='mtag'; t.textContent=o.tag; r.appendChild(t); }
@@ -1053,7 +1053,7 @@
       if(e.key==='ArrowUp'){ moveAt = Math.max(0, moveAt-1); renderMover(); return; }
       if(e.key==='Enter'){ commitMove(moveAt); return; }
       var d = /^Digit([1-9])$/.exec(e.code || '');
-      if(d) commitMove(parseInt(d[1],10) - 1);
+      if(d) commitMove(parseInt(d[1],10) - 2);
       return;
     }
     if(scrim.classList.contains('on')){
@@ -1073,7 +1073,7 @@
     if(k === 'b' || k === 'B'){ e.preventDefault(); toggleSide(); return; }
     if(k === 'l' || k === 'L'){ e.preventDefault(); toggleTheme(); return; }
     if(k === 'h' || k === 'H'){ e.preventDefault(); toggleHidden(); return; }
-    if(k >= '0' && k <= '9'){ e.preventDefault(); jump(parseInt(k,10)); return; }
+    if(k >= '1' && k <= '9'){ e.preventDefault(); jump(parseInt(k,10)); return; }
     if(k === 'ArrowDown'){ e.preventDefault(); e.altKey ? nudge(1) : moveSel(1); return; }
     if(k === 'ArrowUp'){ e.preventDefault(); e.altKey ? nudge(-1) : moveSel(-1); return; }
     if(k === 'Enter'){
