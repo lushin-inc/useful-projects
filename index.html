@@ -507,7 +507,8 @@
     <div class="krow"><span class="kkeys"><kbd>⌥</kbd><kbd>↑</kbd><kbd>↓</kbd></span><span class="kdesc">Move the selected Thing up or down</span></div>
     <div class="krow"><span class="kkeys"><kbd>M</kbd></span><span class="kdesc">Move it to a folder — then press that folder's number</span></div>
     <div class="krow"><span class="kkeys"><kbd>↩</kbd></span><span class="kdesc">Rename it</span></div>
-    <div class="krow"><span class="kkeys"><kbd>⌫</kbd></span><span class="kdesc">Delete it</span></div>
+    <div class="krow"><span class="kkeys"><kbd>⇧</kbd><kbd>↑</kbd><kbd>↓</kbd></span><span class="kdesc">Select a run of Things</span></div>
+    <div class="krow"><span class="kkeys"><kbd>⌫</kbd></span><span class="kdesc">Delete everything selected</span></div>
     <div class="krow"><span class="kkeys"><kbd>⌘</kbd><kbd>Z</kbd></span><span class="kdesc">Undo</span></div>
   </div>
   <div class="kgroup">
@@ -563,7 +564,7 @@
       addScrim=$('addScrim'), addInput=$('addInput'),
       mover=$('mover'), moverList=$('moverList'), moverTitle=$('moverTitle');
 
-  var state=null, sel=null, selKey=null, undoAction=null, toastTimer=null;
+  var state=null, sel=null, selKey=null, selSet=[], anchor=null, undoAction=null, toastTimer=null;
 
   function uid(){ return Math.random().toString(36).slice(2,9); }
 
@@ -670,7 +671,7 @@
   /* ---------- render ---------- */
   function renderFolders(){
     foldersEl.innerHTML = '';
-    var n = 1;                       /* All is 1, Unfiled 2, folders 3+ — same numbers the move picker uses */
+    var n = 1;                       /* Unfiled 1, All 2, folders 3+ — same numbers the move picker uses */
     function nav(id, name, opts){
       var b = document.createElement('div');
       b.className = 'folder' + (opts.fixed ? ' fixed' : '') + (state.view===id ? ' on' : '') + (opts.tucked ? ' tucked' : '');
@@ -691,8 +692,8 @@
       foldersEl.appendChild(b);
     }
 
-    nav('all','All',{fixed:true});
     if(state.folders.length) nav('none','Unfiled',{fixed:true});
+    nav('all','All',{fixed:true});
     shownFolders().forEach(function(f){ nav(f.id, f.name, {}); });
 
     if(state.folders.length){
@@ -734,7 +735,7 @@
       if(folded) return;
       g.items.forEach(function(it){
         var li = document.createElement('li');
-        li.className = 'row' + (sel===it.id ? ' sel' : '');
+        li.className = 'row' + (inSel(it.id) ? ' sel' : '');
         li.dataset.id = it.id;
 
         var gr = document.createElement('span');
@@ -845,7 +846,7 @@
     var b = e.target.closest('.folder');
     if(!b || b.classList.contains('editing')) return;
     if(e.target.closest('.fdel')){ deleteFolder(b.dataset.id); return; }
-    state.view = b.dataset.id; sel = null; selKey = null;
+    state.view = b.dataset.id; clearSel();
     save(); render();
     if(narrow()) app.classList.add('collapsed');   /* on a phone, get out of the way */
   });
@@ -929,9 +930,9 @@
       var folder = (state.view==='all' || state.view==='none') ? null : state.view;
       var it = { id:uid(), text:v, folder:folder };
       state.items.unshift(it);
-      sel = it.id;
+      setSel(it.id);
+      closeAdd();
       save(); renderList();
-      addInput.value='';           /* stay open for the next one */
       list.scrollTop = 0;
     }
     if(e.key==='Escape'){ closeAdd(); }
@@ -939,15 +940,26 @@
   addInput.addEventListener('blur', closeAdd);
 
   /* ---------- delete / rename a Thing ---------- */
-  function deleteItem(id){
-    var idx = state.items.findIndex(function(it){ return it.id===id; });
-    if(idx < 0) return;
-    var removed = state.items[idx];
-    state.items.splice(idx,1);
-    if(sel === id) sel = null;
+  function deleteIds(ids){
+    var gone = [];
+    ids.forEach(function(id){
+      var idx = state.items.findIndex(function(it){ return it.id===id; });
+      if(idx >= 0) gone.push({ i:idx, it:state.items[idx] });
+    });
+    if(!gone.length) return;
+    gone.sort(function(a,b){ return a.i - b.i; });
+    gone.slice().reverse().forEach(function(g){ state.items.splice(g.i,1); });
+    ids.forEach(function(id){
+      if(sel === id) sel = null;
+      var at = selSet.indexOf(id); if(at >= 0) selSet.splice(at,1);
+    });
+    if(!selSet.length) anchor = null;
     save(); renderList();
-    showToast('Deleted', function(){ state.items.splice(Math.min(idx,state.items.length),0,removed); });
+    showToast(gone.length === 1 ? 'Deleted' : 'Deleted ' + gone.length, function(){
+      gone.forEach(function(g){ state.items.splice(Math.min(g.i, state.items.length), 0, g.it); });
+    });
   }
+  function deleteItem(id){ deleteIds([id]); }
   list.addEventListener('click', function(e){
     var head = e.target.closest('.head');
     if(head){
@@ -959,9 +971,16 @@
       return;
     }
     var btn = e.target.closest('.del');
-    if(btn){ deleteItem(btn.closest('.row').dataset.id); return; }
+    if(btn){
+      var rid = btn.closest('.row').dataset.id;
+      deleteIds(inSel(rid) && selSet.length > 1 ? selSet.slice() : [rid]);
+      return;
+    }
     var row = e.target.closest('.row');
-    if(row){ sel = row.dataset.id; selKey = null; renderList(); }
+    if(row){
+      if(e.shiftKey && anchor) extendTo(row.dataset.id); else setSel(row.dataset.id);
+      renderList();
+    }
   });
 
   function renameRow(row){
@@ -992,7 +1011,7 @@
   list.addEventListener('dblclick', function(e){
     var row = e.target.closest('.row');
     if(!row || e.target.closest('.del')) return;
-    sel = row.dataset.id;
+    setSel(row.dataset.id);
     renameRow(row);
   });
 
@@ -1008,7 +1027,35 @@
     return a.tagName==='INPUT' || a.tagName==='TEXTAREA' || a.isContentEditable;
   }
   function stops(){ return [].slice.call(list.querySelectorAll('.head, .row')); }
-  function moveSel(dir){
+  function rowIds(){ return [].map.call(list.querySelectorAll('.row'), function(r){ return r.dataset.id; }); }
+  function inSel(id){ return selSet.indexOf(id) >= 0; }
+  function setSel(id){ sel = id; selKey = null; selSet = id ? [id] : []; anchor = id || null; }
+  function clearSel(){ sel = null; selKey = null; selSet = []; anchor = null; }
+  function extendTo(id){
+    var ids = rowIds();
+    var b = ids.indexOf(id);
+    if(b < 0) return;
+    var a = anchor ? ids.indexOf(anchor) : -1;
+    if(a < 0){ a = b; anchor = id; }
+    selSet = ids.slice(Math.min(a,b), Math.max(a,b) + 1);
+    sel = id; selKey = null;
+  }
+  function scrollToFocus(){
+    var cur = list.querySelector('.row.sel, .head.sel');
+    if(cur) cur.scrollIntoView({block:'nearest'});
+  }
+  function moveSel(dir, extend){
+    if(extend){
+      var ids = rowIds();
+      if(!ids.length) return;
+      var at = sel ? ids.indexOf(sel) : -1;
+      var to = (at < 0) ? (dir > 0 ? 0 : ids.length-1)
+                        : Math.max(0, Math.min(ids.length-1, at+dir));
+      if(!anchor) anchor = ids[at < 0 ? to : at];
+      extendTo(ids[to]);
+      renderList(); scrollToFocus();
+      return;
+    }
     var els = stops();
     if(!els.length) return;
     var i = els.findIndex(function(el){
@@ -1017,15 +1064,13 @@
     });
     i = (i < 0) ? (dir > 0 ? 0 : els.length-1) : Math.max(0, Math.min(els.length-1, i+dir));
     var el = els[i];
-    if(el.classList.contains('row')){ sel = el.dataset.id; selKey = null; }
-    else { selKey = el.dataset.key; sel = null; }
-    renderList();
-    var cur = list.querySelector('.row.sel, .head.sel');
-    if(cur) cur.scrollIntoView({block:'nearest'});
+    if(el.classList.contains('row')) setSel(el.dataset.id);
+    else { selKey = el.dataset.key; sel = null; selSet = []; anchor = null; }
+    renderList(); scrollToFocus();
   }
   /* shuffle the selected Thing within its own group */
   function nudge(dir){
-    if(!sel) return;
+    if(!sel || selSet.length > 1) return;
     var it = itemById(sel); if(!it) return;
     var peers = [];
     state.items.forEach(function(x,i){ if(x.folder===it.folder && onScreen(x)) peers.push(i); });
@@ -1049,14 +1094,14 @@
       state.folded.splice(at,1);
     } else {
       state.folded.push(key);
-      selKey = key; sel = null;      /* the Thing just went out of sight */
+      selKey = key; sel = null; selSet = []; anchor = null;      /* the Thing just went out of sight */
     }
     persist(); renderList();
   }
 
   function jump(n){
     var navs = [].slice.call(foldersEl.querySelectorAll('.folder'));
-    if(navs[n-1]){ state.view = navs[n-1].dataset.id; sel = null; selKey = null; save(); render(); }
+    if(navs[n-1]){ state.view = navs[n-1].dataset.id; clearSel(); save(); render(); }
   }
 
   /* ---------- move the selected Thing to a folder ---------- */
@@ -1067,7 +1112,7 @@
     moveOpts.forEach(function(o,i){
       var r = document.createElement('div');
       r.className = 'mrow' + (i===moveAt ? ' on' : '');
-      var n = document.createElement('span'); n.className='mnum'; n.textContent = String(i+2);
+      var n = document.createElement('span'); n.className='mnum'; n.textContent = String(o.num);
       var nm = document.createElement('span'); nm.className='mname'; nm.textContent = o.name;
       r.appendChild(n); r.appendChild(nm);
       if(o.tag){ var t=document.createElement('span'); t.className='mtag'; t.textContent=o.tag; r.appendChild(t); }
@@ -1079,11 +1124,14 @@
   function openMover(){
     if(!sel || !state.folders.length) return;
     var it = itemById(sel); if(!it) return;
-    moveOpts = [{ id:null, name:'Unfiled', tag:'' }];
-    shownFolders().forEach(function(f){ moveOpts.push({ id:f.id, name:f.name, tag:'' }); });
-    tuckedFolders().forEach(function(f){ moveOpts.push({ id:f.id, name:f.name, tag:'hidden' }); });
+    var count = selSet.length || 1;
+    var num = 1;
+    moveOpts = [{ id:null, name:'Unfiled', tag:'', num:num++ }];
+    num++;                                   /* 2 is All, which is not a destination */
+    shownFolders().forEach(function(f){ moveOpts.push({ id:f.id, name:f.name, tag:'', num:num++ }); });
+    tuckedFolders().forEach(function(f){ moveOpts.push({ id:f.id, name:f.name, tag:'hidden', num:num++ }); });
     moveAt = Math.max(0, moveOpts.findIndex(function(o){ return o.id === (it.folder || null); }));
-    moverTitle.textContent = 'Move — ' + it.text;
+    moverTitle.textContent = count > 1 ? 'Move — ' + count + ' Things' : 'Move — ' + it.text;
     renderMover();
     mover.classList.add('on');
   }
@@ -1092,13 +1140,21 @@
     var o = moveOpts[i];
     closeMover();
     if(!o || !sel) return;
-    var it = itemById(sel); if(!it) return;
-    var prior = it.folder || null;
-    if(prior === o.id) return;
-    it.folder = o.id;
-    if(!inView(it)) sel = null;
+    var ids = selSet.length ? selSet.slice() : [sel];
+    var prior = [];
+    ids.forEach(function(id){
+      var x = itemById(id);
+      if(x){ prior.push({ it:x, folder:x.folder || null }); x.folder = o.id; }
+    });
+    if(!prior.length) return;
+    prior.forEach(function(pr){ if(!inView(pr.it) && sel === pr.it.id) sel = null; });
+    selSet = selSet.filter(function(id){ var x = itemById(id); return x && inView(x); });
+    if(!selSet.length) anchor = null;
     save(); render();
-    showToast(o.id ? 'Moved to ' + o.name : 'Moved to Unfiled', function(){ it.folder = prior; });
+    var label = prior.length > 1 ? prior.length + ' Things moved to ' : 'Moved to ';
+    showToast(o.id ? label + o.name : label + 'Unfiled', function(){
+      prior.forEach(function(pr){ pr.it.folder = pr.folder; });
+    });
     var el = list.querySelector('.row.sel');
     if(el) el.scrollIntoView({block:'nearest'});
   }
@@ -1118,7 +1174,10 @@
       if(e.key==='ArrowUp'){ moveAt = Math.max(0, moveAt-1); renderMover(); return; }
       if(e.key==='Enter'){ commitMove(moveAt); return; }
       var d = /^Digit([1-9])$/.exec(e.code || '');
-      if(d) commitMove(parseInt(d[1],10) - 2);
+      if(d){
+        var want = parseInt(d[1],10);
+        for(var j=0;j<moveOpts.length;j++){ if(moveOpts[j].num === want){ commitMove(j); break; } }
+      }
       return;
     }
     if(scrim.classList.contains('on')){
@@ -1140,10 +1199,11 @@
     if(k === 'l' || k === 'L'){ e.preventDefault(); toggleTheme(); return; }
     if(k === 'h' || k === 'H'){ e.preventDefault(); toggleHidden(); return; }
     if(k >= '1' && k <= '9'){ e.preventDefault(); jump(parseInt(k,10)); return; }
-    if(k === 'ArrowDown'){ e.preventDefault(); e.altKey ? nudge(1) : moveSel(1); return; }
-    if(k === 'ArrowUp'){ e.preventDefault(); e.altKey ? nudge(-1) : moveSel(-1); return; }
+    if(k === 'ArrowDown'){ e.preventDefault(); e.altKey ? nudge(1) : moveSel(1, e.shiftKey); return; }
+    if(k === 'ArrowUp'){ e.preventDefault(); e.altKey ? nudge(-1) : moveSel(-1, e.shiftKey); return; }
     if(k === 'Enter'){
       if(selKey){ e.preventDefault(); foldCurrent(); return; }
+      if(selSet.length > 1) return;                 /* renaming a range makes no sense */
       var row = list.querySelector('.row.sel');
       if(row){ e.preventDefault(); renameRow(row); }
       return;
@@ -1154,7 +1214,8 @@
         if(state.view !== 'all' && state.view !== 'none'){ e.preventDefault(); deleteFolder(state.view); }
         return;
       }
-      if(sel){ e.preventDefault(); deleteItem(sel); }
+      if(selSet.length){ e.preventDefault(); deleteIds(selSet.slice()); }
+      else if(sel){ e.preventDefault(); deleteItem(sel); }
       return;
     }
   });
@@ -1319,7 +1380,7 @@
       });
       if(!n && !folders.length) return;
       state.folders = folders; state.items = items;
-      state.view = 'all'; sel = null; selKey = null;
+      state.view = 'all'; clearSel();
       save(); render();
       showToast('Imported ' + n, null);
     };
@@ -1380,7 +1441,7 @@
     state.items = Array.isArray(data.items) ? data.items : [];
     state.updated = typeof data.updated === 'number' ? data.updated : now();
     if(state.view !== 'all' && state.view !== 'none' && !folderById(state.view)) state.view = 'all';
-    sel = null; selKey = null;
+    clearSel();
     persist(); render();
   }
   /* Fold anything the repo has that this device doesn't into the local list.
