@@ -195,6 +195,7 @@
   }
   .head:first-child{padding-top:2px}
   .head:hover{color:var(--muted)}
+  .head.sel{color:var(--accent)}
   .hchev{flex:none;display:grid;place-items:center;transition:transform .15s}
   .head:not(.folded) .hchev{transform:rotate(90deg)}
 
@@ -502,7 +503,7 @@
   <div class="kgroup">
     <div class="klabel">Things</div>
     <div class="krow"><span class="kkeys"><kbd>N</kbd></span><span class="kdesc">New Thing</span></div>
-    <div class="krow"><span class="kkeys"><kbd>↑</kbd><kbd>↓</kbd></span><span class="kdesc">Move the selection</span></div>
+    <div class="krow"><span class="kkeys"><kbd>↑</kbd><kbd>↓</kbd></span><span class="kdesc">Move the selection — headings included</span></div>
     <div class="krow"><span class="kkeys"><kbd>⌥</kbd><kbd>↑</kbd><kbd>↓</kbd></span><span class="kdesc">Move the selected Thing up or down</span></div>
     <div class="krow"><span class="kkeys"><kbd>M</kbd></span><span class="kdesc">Move it to a folder — then press that folder's number</span></div>
     <div class="krow"><span class="kkeys"><kbd>↩</kbd></span><span class="kdesc">Rename it</span></div>
@@ -515,7 +516,7 @@
     <div class="krow"><span class="kkeys"><kbd>1</kbd>–<kbd>9</kbd></span><span class="kdesc">Jump to a folder — the numbers shown in the sidebar</span></div>
     <div class="krow"><span class="kkeys"><kbd>H</kbd></span><span class="kdesc">Show or hide the Hidden folders</span></div>
     <div class="krow"><span class="kkeys"><kbd>⇧</kbd><kbd>⌫</kbd></span><span class="kdesc">Delete the folder you're in — its Things go to Unfiled</span></div>
-    <div class="krow"><span class="kkeys"><kbd>C</kbd></span><span class="kdesc">Collapse or expand every heading in All</span></div>
+    <div class="krow"><span class="kkeys"><kbd>C</kbd></span><span class="kdesc">Collapse or expand the heading you are on</span></div>
   </div>
   <div class="kgroup">
     <div class="klabel">View</div>
@@ -562,7 +563,7 @@
       addScrim=$('addScrim'), addInput=$('addInput'),
       mover=$('mover'), moverList=$('moverList'), moverTitle=$('moverTitle');
 
-  var state=null, sel=null, undoAction=null, toastTimer=null;
+  var state=null, sel=null, selKey=null, undoAction=null, toastTimer=null;
 
   function uid(){ return Math.random().toString(36).slice(2,9); }
 
@@ -723,7 +724,7 @@
       if(labelled){
         folded = isFolded(gkey(g.folder));
         var h = document.createElement('li');
-        h.className = 'head' + (folded ? ' folded' : '');
+        h.className = 'head' + (folded ? ' folded' : '') + (selKey === gkey(g.folder) ? ' sel' : '');
         h.dataset.folder = g.folder || '';
         h.dataset.key = gkey(g.folder);
         h.innerHTML = '<span class="hchev"><svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 1.5L7 5l-3.5 3.5"/></svg></span>';
@@ -844,7 +845,7 @@
     var b = e.target.closest('.folder');
     if(!b || b.classList.contains('editing')) return;
     if(e.target.closest('.fdel')){ deleteFolder(b.dataset.id); return; }
-    state.view = b.dataset.id; sel = null;
+    state.view = b.dataset.id; sel = null; selKey = null;
     save(); render();
     if(narrow()) app.classList.add('collapsed');   /* on a phone, get out of the way */
   });
@@ -953,13 +954,14 @@
       var key = head.dataset.key;
       var at = state.folded.indexOf(key);
       if(at >= 0) state.folded.splice(at,1); else state.folded.push(key);
+      selKey = key; sel = null;
       persist(); renderList();
       return;
     }
     var btn = e.target.closest('.del');
     if(btn){ deleteItem(btn.closest('.row').dataset.id); return; }
     var row = e.target.closest('.row');
-    if(row){ sel = row.dataset.id; renderList(); }
+    if(row){ sel = row.dataset.id; selKey = null; renderList(); }
   });
 
   function renameRow(row){
@@ -1005,16 +1007,21 @@
     if(!a) return false;
     return a.tagName==='INPUT' || a.tagName==='TEXTAREA' || a.isContentEditable;
   }
-  function visibleRows(){ return [].slice.call(list.querySelectorAll('.row')); }
+  function stops(){ return [].slice.call(list.querySelectorAll('.head, .row')); }
   function moveSel(dir){
-    var rows = visibleRows();
-    if(!rows.length) return;
-    var i = rows.findIndex(function(r){ return r.dataset.id === sel; });
-    i = (i < 0) ? (dir > 0 ? 0 : rows.length-1) : Math.max(0, Math.min(rows.length-1, i+dir));
-    sel = rows[i].dataset.id;
+    var els = stops();
+    if(!els.length) return;
+    var i = els.findIndex(function(el){
+      return el.classList.contains('row') ? (sel && el.dataset.id === sel)
+                                          : (selKey && el.dataset.key === selKey);
+    });
+    i = (i < 0) ? (dir > 0 ? 0 : els.length-1) : Math.max(0, Math.min(els.length-1, i+dir));
+    var el = els[i];
+    if(el.classList.contains('row')){ sel = el.dataset.id; selKey = null; }
+    else { selKey = el.dataset.key; sel = null; }
     renderList();
-    var el = list.querySelector('.row.sel');
-    if(el) el.scrollIntoView({block:'nearest'});
+    var cur = list.querySelector('.row.sel, .head.sel');
+    if(cur) cur.scrollIntoView({block:'nearest'});
   }
   /* shuffle the selected Thing within its own group */
   function nudge(dir){
@@ -1031,18 +1038,25 @@
     var el = list.querySelector('.row.sel');
     if(el) el.scrollIntoView({block:'nearest'});
   }
-  /* fold or unfold every group at once (All view only — nowhere else has headings) */
-  function toggleFolds(){
-    if(state.view !== 'all' || !state.folders.length) return;
-    var keys = ['none'].concat(shownFolders().map(function(f){ return f.id; }));
-    var allFolded = keys.every(function(k){ return state.folded.indexOf(k) >= 0; });
-    state.folded = allFolded ? [] : keys;
+  /* fold or unfold the heading you are on — or the one owning the selected Thing */
+  function foldCurrent(){
+    if(state.view !== 'all') return;
+    var key = selKey;
+    if(!key && sel){ var it = itemById(sel); if(it) key = gkey(it.folder); }
+    if(!key) return;
+    var at = state.folded.indexOf(key);
+    if(at >= 0){
+      state.folded.splice(at,1);
+    } else {
+      state.folded.push(key);
+      selKey = key; sel = null;      /* the Thing just went out of sight */
+    }
     persist(); renderList();
   }
 
   function jump(n){
     var navs = [].slice.call(foldersEl.querySelectorAll('.folder'));
-    if(navs[n-1]){ state.view = navs[n-1].dataset.id; sel = null; save(); render(); }
+    if(navs[n-1]){ state.view = navs[n-1].dataset.id; sel = null; selKey = null; save(); render(); }
   }
 
   /* ---------- move the selected Thing to a folder ---------- */
@@ -1120,7 +1134,7 @@
     if(k === 'Escape'){ closeAdd(); return; }
     if(k === 'N' && e.shiftKey){ e.preventDefault(); newFolder(); return; }
     if(k === 'n' || k === 'N'){ e.preventDefault(); newThing(); return; }
-    if(k === 'c' || k === 'C'){ e.preventDefault(); toggleFolds(); return; }
+    if(k === 'c' || k === 'C'){ e.preventDefault(); foldCurrent(); return; }
     if(k === 'm' || k === 'M'){ e.preventDefault(); openMover(); return; }
     if(k === 'b' || k === 'B'){ e.preventDefault(); toggleSide(); return; }
     if(k === 'l' || k === 'L'){ e.preventDefault(); toggleTheme(); return; }
@@ -1129,6 +1143,7 @@
     if(k === 'ArrowDown'){ e.preventDefault(); e.altKey ? nudge(1) : moveSel(1); return; }
     if(k === 'ArrowUp'){ e.preventDefault(); e.altKey ? nudge(-1) : moveSel(-1); return; }
     if(k === 'Enter'){
+      if(selKey){ e.preventDefault(); foldCurrent(); return; }
       var row = list.querySelector('.row.sel');
       if(row){ e.preventDefault(); renameRow(row); }
       return;
@@ -1304,7 +1319,7 @@
       });
       if(!n && !folders.length) return;
       state.folders = folders; state.items = items;
-      state.view = 'all'; sel = null;
+      state.view = 'all'; sel = null; selKey = null;
       save(); render();
       showToast('Imported ' + n, null);
     };
@@ -1365,7 +1380,7 @@
     state.items = Array.isArray(data.items) ? data.items : [];
     state.updated = typeof data.updated === 'number' ? data.updated : now();
     if(state.view !== 'all' && state.view !== 'none' && !folderById(state.view)) state.view = 'all';
-    sel = null;
+    sel = null; selKey = null;
     persist(); render();
   }
   /* Fold anything the repo has that this device doesn't into the local list.
