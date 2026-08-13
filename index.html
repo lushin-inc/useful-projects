@@ -63,6 +63,10 @@
     transition:width .18s ease;
     -webkit-user-select:none;user-select:none;
   }
+  #sideScrim{
+    display:none;position:fixed;inset:0;z-index:17;
+    background:rgba(0,0,0,.45);
+  }
   #app.collapsed #side{width:0}
   #app.collapsed.peek #side{width:200px}
   #sideInner{width:200px;padding:calc(56px + env(safe-area-inset-top)) 10px 10px;display:flex;flex-direction:column;height:100%}
@@ -412,6 +416,8 @@
     #app.collapsed #side{box-shadow:none}
     footer{padding-right:76px}
     #app{height:100dvh}
+    /* the toggle sits under the drawer, so tapping the list closes it */
+    #app:not(.collapsed) #sideScrim{display:block}
   }
 
   /* touch: no hover and no keyboard, so every affordance has to be visible */
@@ -421,6 +427,7 @@
     .del{opacity:.55}
     .fdel{opacity:.55}
     .grip{color:var(--muted)}
+    .fkey{display:none}
     .row{padding-top:15px;padding-bottom:15px}
     .folder{padding-top:12px;padding-bottom:12px}
     footer{gap:20px;font-size:13px;padding-bottom:calc(16px + env(safe-area-inset-bottom))}
@@ -430,6 +437,7 @@
 <body>
 
 <div id="app">
+  <div id="sideScrim"></div>
   <aside id="side">
     <div id="sideInner">
       <div id="folders"></div>
@@ -771,6 +779,10 @@
     save();
   }
   $('sideToggle').addEventListener('click', toggleSide);
+  $('sideScrim').addEventListener('click', function(){
+    app.classList.add('collapsed');
+    state.collapsed = true; save();
+  });
 
   function toggleHidden(){
     if(!state.folders.length) return;
