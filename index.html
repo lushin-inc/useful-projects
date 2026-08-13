@@ -145,11 +145,22 @@
   }
   #sideToggle:hover{color:var(--muted);background:var(--hover)}
   h1{
-    margin:0;font-size:14px;font-weight:500;letter-spacing:.03em;
+    margin:0;flex:1;min-width:0;
+    font-size:14px;font-weight:500;letter-spacing:.03em;
     color:var(--muted);
     -webkit-user-select:none;user-select:none;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   }
+  #addBtn{
+    flex:none;width:32px;height:32px;
+    display:grid;place-items:center;border-radius:8px;
+    font-size:21px;line-height:1;color:var(--muted);
+    -webkit-app-region:no-drag;
+  }
+  #addBtn:hover{color:var(--fg);background:var(--hover)}
+
+  /* dragging starts on the grip, so the list still scrolls under a finger */
+  .grip{touch-action:none}
 
   #list{
     list-style:none;margin:0;padding:0 0 24px;
@@ -202,14 +213,49 @@
   }
   .row.dragging .del{opacity:0}
 
-  #addWrap{padding:2px 0 6px}
+  /* ---------- add a Thing ---------- */
+  #fab{
+    display:none;
+    position:fixed;right:20px;bottom:calc(20px + env(safe-area-inset-bottom));
+    width:62px;height:62px;border-radius:50%;
+    place-items:center;
+    background:var(--lift);
+    border:1.5px solid var(--muted);
+    color:var(--fg);
+    font-size:32px;font-weight:300;line-height:1;
+    box-shadow:0 6px 20px var(--shadow);
+    z-index:25;
+    -webkit-user-select:none;user-select:none;
+  }
+  #addScrim{
+    position:fixed;inset:0;z-index:32;
+    background:var(--scrim);
+    display:none;
+    justify-content:center;
+    align-items:flex-start;
+    padding:12vh 20px 20px;
+  }
+  #addScrim.on{display:flex}
+  #addSheet{
+    width:min(460px,100%);
+    background:var(--bg);
+    border-radius:14px;
+    padding:18px;
+    box-shadow:0 24px 60px var(--shadow);
+  }
   #addInput{
     width:100%;border:0;outline:0;background:var(--hover);
-    color:var(--fg);font:inherit;
-    padding:11px 12px;border-radius:9px;
+    color:var(--fg);font:inherit;font-size:17px;
+    padding:14px 14px;border-radius:10px;
     caret-color:var(--accent);
   }
   #addInput::placeholder{color:var(--faint)}
+  #addDone{
+    display:block;margin:14px 0 0 auto;
+    padding:9px 18px;border-radius:8px;
+    font-size:14px;background:var(--sel);color:var(--fg);
+  }
+  #addDone:hover{background:var(--accent);color:#fff}
 
   #empty{padding:14px 12px;color:var(--faint);-webkit-user-select:none;user-select:none}
 
@@ -352,6 +398,28 @@
   #syncOff:hover{background:0;color:#e06c5a}
   #syncMsg{margin-top:14px;font-size:12.5px;color:var(--muted);min-height:1em}
   #syncMsg.err{color:#e06c5a}
+  /* narrow screens: the sidebar floats over the list instead of squeezing it */
+  @media (max-width:640px){
+    main{max-width:none}
+    #side{
+      position:absolute;left:0;top:0;bottom:0;z-index:18;
+      box-shadow:8px 0 28px var(--shadow);
+    }
+    #app.collapsed #side{box-shadow:none}
+    footer{padding-right:76px}
+  }
+
+  /* touch: no hover and no keyboard, so every affordance has to be visible */
+  @media (hover:none){
+    #fab{display:grid}
+    #addBtn{display:none}
+    .del{opacity:.55}
+    .fdel{opacity:.55}
+    .grip{color:var(--muted)}
+    .row{padding-top:15px;padding-bottom:15px}
+    .folder{padding-top:12px;padding-bottom:12px}
+    footer{gap:20px;font-size:13px;padding-bottom:calc(16px + env(safe-area-inset-bottom))}
+  }
 </style>
 </head>
 <body>
@@ -372,9 +440,9 @@
         </svg>
       </button>
       <h1 id="title">Stuff</h1>
+      <button id="addBtn" type="button" aria-label="New Thing">+</button>
     </header>
 
-    <div id="addWrap" hidden><input id="addInput" type="text" placeholder="New Thing" autocomplete="off" autocorrect="off" spellcheck="false"></div>
     <ul id="list"></ul>
 
     <footer>
@@ -387,6 +455,13 @@
     </footer>
   </main>
 </div>
+
+<button id="fab" type="button" aria-label="New Thing">+</button>
+
+<div id="addScrim"><div id="addSheet">
+  <input id="addInput" type="text" placeholder="New Thing" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="done">
+  <button id="addDone" type="button">Done</button>
+</div></div>
 
 <div id="toast"><span id="toastMsg"></span><button id="undoBtn" type="button">Undo</button></div>
 
@@ -441,7 +516,7 @@
   "use strict";
 
   /* ---- a brand-new copy starts with these ---- */
-  var SEED = [];
+  var SEED = ["\"Useful Projects\" separate list", "Essentials Rec Portal", "All AP Recordings", "Higher Levels Course", "Inbox Empty", "LinkedIn Sales Nav Course", "Positive Psychology Therapists", "Hubexo KAM Team Cheat Sheet"];
 
   var KEY = 'useful-projects-v2';   /* unchanged: keeps existing lists intact */
   var OLD = 'useful-projects-v1';
@@ -450,7 +525,7 @@
   var app=$('app'), list=$('list'), titleEl=$('title'), foldersEl=$('folders'),
       toast=$('toast'), toastMsg=$('toastMsg'), undoBtn=$('undoBtn'),
       fileInput=$('file'), scrim=$('scrim'),
-      addWrap=$('addWrap'), addInput=$('addInput'),
+      addScrim=$('addScrim'), addInput=$('addInput'),
       mover=$('mover'), moverList=$('moverList'), moverTitle=$('moverTitle');
 
   var state=null, sel=null, undoAction=null, toastTimer=null;
@@ -598,7 +673,7 @@
 
     if(!any && !labelled){
       var p = document.createElement('li');
-      p.id='empty'; p.textContent='Nothing here. Press N to add a Thing.';
+      p.id='empty'; p.textContent='Nothing here yet.';
       list.appendChild(p);
       return;
     }
@@ -680,10 +755,14 @@
   undoBtn.addEventListener('click', runUndo);
 
   /* ---------- sidebar controls ---------- */
-  if(state.collapsed) app.classList.add('collapsed');
+  function narrow(){ return window.innerWidth < 640; }
+  if(state.collapsed || narrow()) app.classList.add('collapsed');
   function toggleSide(){
-    state.collapsed = !state.collapsed;
-    app.classList.toggle('collapsed', state.collapsed);
+    /* derive from the class, not the stored flag — a phone starts collapsed
+       regardless of what was saved, and the two must not drift apart */
+    var next = !app.classList.contains('collapsed');
+    app.classList.toggle('collapsed', next);
+    state.collapsed = next;
     save();
   }
   $('sideToggle').addEventListener('click', toggleSide);
@@ -716,6 +795,7 @@
     if(e.target.closest('.fdel')){ deleteFolder(b.dataset.id); return; }
     state.view = b.dataset.id; sel = null;
     save(); render();
+    if(narrow()) app.classList.add('collapsed');   /* on a phone, get out of the way */
   });
 
   foldersEl.addEventListener('dblclick', function(e){
@@ -780,11 +860,15 @@
 
   /* ---------- add a Thing ---------- */
   function newThing(){
-    addWrap.hidden = false;
+    addScrim.classList.add('on');
     addInput.value = '';
     addInput.focus();
   }
-  function closeAdd(){ addWrap.hidden = true; addInput.value=''; }
+  function closeAdd(){ addScrim.classList.remove('on'); addInput.value=''; addInput.blur(); }
+  $('addBtn').addEventListener('click', newThing);
+  $('fab').addEventListener('click', newThing);
+  $('addDone').addEventListener('click', closeAdd);
+  addScrim.addEventListener('click', function(e){ if(e.target === addScrim) closeAdd(); });
   addInput.addEventListener('keydown', function(e){
     e.stopPropagation();
     if(e.key==='Enter'){
@@ -944,6 +1028,7 @@
 
   document.addEventListener('keydown', function(e){
     if(syncScrim && syncScrim.classList.contains('on')) return;   /* the sync sheet owns the keyboard */
+    if(addScrim && addScrim.classList.contains('on')) return;
     if(mover.classList.contains('on')){
       e.preventDefault();
       if(e.key==='Escape'){ closeMover(); return; }
@@ -1019,6 +1104,7 @@
     if(e.button !== 0) return;
     var row = e.target.closest('.row');
     if(!row || row.classList.contains('editing') || e.target.closest('.del')) return;
+    if(e.pointerType === 'touch' && !e.target.closest('.grip')) return;
     drag = { kind:'item', el:row, startY:e.clientY, startX:e.clientX, active:false, over:null };
   });
 
